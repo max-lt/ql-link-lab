@@ -25,29 +25,27 @@ use std::{
     future::Future,
     path::Path,
     pin::Pin,
-    str::Utf8Error,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
 
 use async_channel::{Receiver, Sender};
-use bytes::{Buf, BufMut};
 use futures_lite::Stream;
-use ql_fsm::{PeerStatus, QlFsmConfig};
+use ql_api::{route, BenchmarkEvent, BenchmarkRequest, DownloadBenchmarkHeader, DownloadBenchmarkPartHeader, DownloadBenchmarkRequest, EchoRequest, EchoResponse};
+use ql_fsm::{PairingInvite, PeerStatus, QlFsmConfig};
 use ql_rpc::{
-    download::Download, request::Request, subscription::Subscription, DownloadHandler,
-    DownloadResponder, RequestHandler, Response, RouteId, Router, RpcCodec, RpcStream, SendSpawn,
-    SubscriptionHandler, SubscriptionResponder,
+    DownloadHandler, DownloadStart, RequestHandler, Response, RouteId, Router, RpcStream,
+    SendSpawner, Spawner, SubscriptionHandler, SubscriptionResponder,
 };
 #[cfg(feature = "chat")]
-use ql_rpc::notification::Notification;
+use ql_rpc::{notification::Notification, request::Request, Route};
 use ql_runtime::{
     new_runtime, QlInbound, QlPlatform, QlStream, QlTimer, RuntimeConfig, RuntimeHandle,
 };
 use ql_wire::{
-    test_identity, MlKemCiphertext, MlKemKeyPair, MlKemPrivateKey, MlKemPublicKey, Nonce,
+    generate_identity, MlKemCiphertext, MlKemKeyPair, MlKemPrivateKey, MlKemPublicKey, Nonce,
     PairingToken, PeerBundle, QlAead, QlHash, QlIdentity, QlKem, QlRandom, SessionKey,
-    SoftwareCrypto, WireDecode, WireEncode, XID,
+    SoftwareCrypto, WireDecode, WireEncode, QID,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -59,124 +57,45 @@ const DEFAULT_RELAY: &str = "127.0.0.1:8766";
 /// Persisted (identity ‖ peer bundle) — its presence selects IK vs XX mode.
 const DEFAULT_STATE: &str = "/tmp/ql-link-lab-peer.state";
 
-// ===== RPC surface (must match KeyOS-dev/test-apps/gui-app-qlv2/src/rpc.rs) =====
-
-struct Echo;
-
-impl Request for Echo {
-    type Error = Utf8Error;
-    type Request = String;
-    type Response = String;
-
-    const ROUTE: RouteId = RouteId(1);
-}
-
-struct BytesBenchmark;
-
-impl Subscription for BytesBenchmark {
-    type Error = std::convert::Infallible;
-    type Event = Vec<u8>;
-    type Request = BenchmarkRequest;
-
-    const ROUTE: RouteId = RouteId(2);
-}
-
-#[derive(Clone)]
-struct BenchmarkRequest {
-    length: u32,
-}
-
-impl RpcCodec for BenchmarkRequest {
-    type Error = std::convert::Infallible;
-
-    fn encode_value<B: BufMut + ?Sized>(&self, out: &mut B) {
-        out.put_u32(self.length);
-    }
-
-    fn decode_value<B: Buf>(bytes: &mut B) -> Result<Self, Self::Error> {
-        Ok(BenchmarkRequest {
-            length: bytes.get_u32(),
-        })
-    }
-}
-
-struct DownloadBenchmark;
-
-impl Download for DownloadBenchmark {
-    type Error = std::convert::Infallible;
-    type Request = DownloadBenchmarkRequest;
-    type ResponseHeader = DownloadBenchmarkHeader;
-
-    const ROUTE: RouteId = RouteId(3);
-}
-
-#[derive(Clone)]
-struct DownloadBenchmarkRequest {
-    length: u64,
-}
-
-impl RpcCodec for DownloadBenchmarkRequest {
-    type Error = std::convert::Infallible;
-
-    fn encode_value<B: BufMut + ?Sized>(&self, out: &mut B) {
-        out.put_u64(self.length);
-    }
-
-    fn decode_value<B: Buf>(bytes: &mut B) -> Result<Self, Self::Error> {
-        Ok(Self {
-            length: bytes.get_u64(),
-        })
-    }
-}
-
-struct DownloadBenchmarkHeader {
-    hash: Vec<u8>,
-}
-
-impl RpcCodec for DownloadBenchmarkHeader {
-    type Error = std::convert::Infallible;
-
-    // The device's `decode_value` uses `Vec::<u8>::decode_value` (length-prefixed),
-    // so we encode the same way. The device's own `encode_value` (in
-    // `KeyOS-dev/test-apps/gui-app-qlv2/src/rpc.rs`) uses `put_slice` with no
-    // length prefix — that's an encode/decode asymmetry on the device side,
-    // benign because the device is client-only for this RPC.
-    fn encode_value<B: BufMut + ?Sized>(&self, out: &mut B) {
-        Vec::<u8>::encode_value(&self.hash, out);
-    }
-
-    fn decode_value<B: Buf>(bytes: &mut B) -> Result<Self, Self::Error> {
-        Ok(Self {
-            hash: Vec::<u8>::decode_value(bytes)?,
-        })
-    }
-}
+// ===== RPC surface =====
+//
+// Echo / BytesBenchmark / DownloadBenchmark are the canonical Route types
+// from `ql-api`. They match KeyOS-dev/test-apps/gui-app-qlv2/src/rpc.rs by
+// construction (both sides import them from the same crate).
+//
+// ChatSend / ChatPush are custom routes used only by the chat demo
+// (test-apps/gui-app-chat); they are not in ql-api so we define them locally
+// with the same constants the device uses.
 
 // ===== Chat (feature-gated) RPC types =====
 //
 // Mirrors `KeyOS-dev/test-apps/gui-app-chat/src/rpc.rs`. ChatSend is a Request
 // (device → backend) because api/ql exposes `request` but not `notification`.
-// ChatPush is a Notification (backend → device) because backend's ql-runtime
-// `RpcHandle` exposes `notification`, and the device just serves it via a
-// NotificationHandler<ChatPush> in its Router.
+// ChatPush is a Notification (backend → device).
 
 #[cfg(feature = "chat")]
-struct ChatSend;
+pub struct ChatSend;
+#[cfg(feature = "chat")]
+impl Route for ChatSend {
+    const ROUTE: RouteId = RouteId::from_u32(100);
+}
 #[cfg(feature = "chat")]
 impl Request for ChatSend {
     type Error = std::str::Utf8Error;
     type Request = String;
     type Response = String;
-    const ROUTE: RouteId = RouteId(100);
 }
 
 #[cfg(feature = "chat")]
-struct ChatPush;
+pub struct ChatPush;
+#[cfg(feature = "chat")]
+impl Route for ChatPush {
+    const ROUTE: RouteId = RouteId::from_u32(101);
+}
 #[cfg(feature = "chat")]
 impl Notification for ChatPush {
     type Error = std::str::Utf8Error;
     type Payload = String;
-    const ROUTE: RouteId = RouteId(101);
 }
 
 // ===== RPC server side (serve mode) =====
@@ -188,106 +107,131 @@ impl Notification for ChatPush {
 #[derive(Clone)]
 struct RouterState;
 
-impl RequestHandler<Echo, QlStream> for RouterState {
-    fn handle(self, message: String, responder: Response<String, <QlStream as RpcStream>::Writer>) {
-        println!("[backend] ← inbound Echo {message:?} — spawning respond task");
-        let echoed = message.clone();
-        tokio::spawn(async move {
-            println!("[backend]   .. respond task started, calling respond({echoed:?})");
-            match responder.respond(echoed.clone()).await {
-                Ok(()) => println!("[backend]   .. respond OK ({echoed:?})"),
-                Err(e) => eprintln!("[backend]   .. respond FAILED ({echoed:?}): {e:?}"),
-            }
-        });
+/// Backend-side spawner for the Router. The new ql-rpc API requires the
+/// user to provide a `SendSpawner` (replaces the old built-in `SendSpawn`).
+#[derive(Clone, Copy)]
+struct TokioSendSpawn;
+
+impl Spawner for TokioSendSpawn {
+    type Handle = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+}
+
+impl SendSpawner for TokioSendSpawn {
+    fn spawn<F>(&self, fut: F) -> Self::Handle
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        Box::pin(fut)
+    }
+}
+
+impl RequestHandler<route::Echo, QlStream> for RouterState {
+    async fn handle(
+        self,
+        request: EchoRequest,
+        responder: Response<EchoResponse, <QlStream as RpcStream>::Writer>,
+    ) {
+        println!("[backend] ← inbound Echo {:?} — responding", request.message);
+        let echoed = request.message.clone();
+        match responder.respond(EchoResponse { message: echoed.clone() }).await {
+            Ok(()) => println!("[backend]   .. respond OK ({echoed:?})"),
+            Err(e) => eprintln!("[backend]   .. respond FAILED ({echoed:?}): {e:?}"),
+        }
     }
 }
 
 // Stream `request.length` bytes back to the subscriber in 4 KiB chunks.
 const BENCHMARK_CHUNK_LEN: usize = 4 * 1024;
 
-impl SubscriptionHandler<BytesBenchmark, QlStream> for RouterState {
-    fn handle(
+impl SubscriptionHandler<route::BytesBenchmark, QlStream> for RouterState {
+    async fn handle(
         self,
         request: BenchmarkRequest,
-        mut responder: SubscriptionResponder<Vec<u8>, <QlStream as RpcStream>::Writer>,
+        mut responder: SubscriptionResponder<BenchmarkEvent, <QlStream as RpcStream>::Writer>,
     ) {
         let total = request.length as usize;
         println!("[backend] ← inbound BytesBenchmark subscription, length={total} — streaming");
-        tokio::spawn(async move {
-            let started = Instant::now();
-            let mut remaining = total;
-            while remaining > 0 {
-                let n = remaining.min(BENCHMARK_CHUNK_LEN);
-                if let Err(e) = responder.send(vec![0u8; n]).await {
-                    eprintln!("[backend]   .. BytesBenchmark send failed at {} B: {e:?}", total - remaining);
-                    return;
-                }
-                remaining -= n;
+        let started = Instant::now();
+        let mut remaining = total;
+        while remaining > 0 {
+            let n = remaining.min(BENCHMARK_CHUNK_LEN);
+            if let Err(e) = responder.send(BenchmarkEvent { bytes: vec![0u8; n] }).await {
+                eprintln!("[backend]   .. BytesBenchmark send failed at {} B: {e:?}", total - remaining);
+                return;
             }
-            match responder.finish().await {
-                Ok(()) => println!(
-                    "[backend]   .. BytesBenchmark OK ({total} B in {:.2}s)",
-                    started.elapsed().as_secs_f64()
-                ),
-                Err(e) => eprintln!("[backend]   .. BytesBenchmark finish FAILED: {e:?}"),
-            }
-        });
+            remaining -= n;
+        }
+        match responder.finish().await {
+            Ok(()) => println!(
+                "[backend]   .. BytesBenchmark OK ({total} B in {:.2}s)",
+                started.elapsed().as_secs_f64()
+            ),
+            Err(e) => eprintln!("[backend]   .. BytesBenchmark finish FAILED: {e:?}"),
+        }
     }
 }
 
 #[cfg(feature = "chat")]
 impl RequestHandler<ChatSend, QlStream> for RouterState {
-    fn handle(self, message: String, responder: Response<String, <QlStream as RpcStream>::Writer>) {
+    async fn handle(self, message: String, responder: Response<String, <QlStream as RpcStream>::Writer>) {
         println!("[backend] chat ← from device: {message:?}");
-        tokio::spawn(async move {
-            // Ack with the same text — keeps the device UI flow simple and
-            // confirms end-to-end delivery.
-            let _ = responder.respond(message).await;
-        });
+        // Ack with the same text — keeps the device UI flow simple and
+        // confirms end-to-end delivery.
+        let _ = responder.respond(message).await;
     }
 }
 
-impl DownloadHandler<DownloadBenchmark, QlStream> for RouterState {
-    fn handle(
+impl DownloadHandler<route::DownloadBenchmark, QlStream> for RouterState {
+    async fn handle(
         self,
         request: DownloadBenchmarkRequest,
-        responder: DownloadResponder<DownloadBenchmarkHeader, <QlStream as RpcStream>::Writer>,
+        download: DownloadStart<route::DownloadBenchmark, <QlStream as RpcStream>::Writer>,
     ) {
         let total = request.length as usize;
         println!("[backend] ← inbound DownloadBenchmark, length={total} — preparing payload + sha256");
-        tokio::spawn(async move {
-            // Build the deterministic payload (zeros) and its SHA-256 so the
-            // device can verify integrity if it wants.
-            let payload = vec![0u8; total];
-            let hash = SoftwareCrypto.sha256(&[&payload]).to_vec();
-            let started = Instant::now();
-            let mut writer = match responder.respond(DownloadBenchmarkHeader { hash }).await {
-                Ok(w) => w,
-                Err(e) => {
-                    eprintln!("[backend]   .. DownloadBenchmark header send FAILED: {e:?}");
-                    return;
-                }
-            };
-            let mut remaining = total;
-            let mut offset = 0;
-            while remaining > 0 {
-                let n = remaining.min(BENCHMARK_CHUNK_LEN);
-                let chunk = bytes::Bytes::copy_from_slice(&payload[offset..offset + n]);
-                if let Err(e) = writer.send(chunk).await {
-                    eprintln!("[backend]   .. DownloadBenchmark body send failed at {offset} B: {e:?}");
-                    return;
-                }
-                offset += n;
-                remaining -= n;
+        // Build the deterministic payload (zeros) and its SHA-256 so the
+        // device can verify integrity if it wants.
+        let payload = vec![0u8; total];
+        let hash = SoftwareCrypto.sha256(&[&payload]).to_vec();
+        let started = Instant::now();
+        let mut writer = match download.start(DownloadBenchmarkHeader { hash }).await {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("[backend]   .. DownloadBenchmark header send FAILED: {e:?}");
+                return;
             }
-            match writer.finish().await {
-                Ok(()) => println!(
-                    "[backend]   .. DownloadBenchmark OK ({total} B in {:.2}s)",
-                    started.elapsed().as_secs_f64()
-                ),
-                Err(e) => eprintln!("[backend]   .. DownloadBenchmark finish FAILED: {e:?}"),
+        };
+        // Single part: body delivered in 4 KiB chunks.
+        let mut part = match writer.start_part(DownloadBenchmarkPartHeader {}).await {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[backend]   .. DownloadBenchmark start_part FAILED: {e:?}");
+                return;
             }
-        });
+        };
+        let mut remaining = total;
+        let mut offset = 0;
+        while remaining > 0 {
+            let n = remaining.min(BENCHMARK_CHUNK_LEN);
+            let chunk = bytes::Bytes::copy_from_slice(&payload[offset..offset + n]);
+            if let Err(e) = part.send(chunk).await {
+                eprintln!("[backend]   .. DownloadBenchmark body send failed at {offset} B: {e:?}");
+                return;
+            }
+            offset += n;
+            remaining -= n;
+        }
+        if let Err(e) = part.finish().await {
+            eprintln!("[backend]   .. DownloadBenchmark part.finish FAILED: {e:?}");
+            return;
+        }
+        match writer.finish().await {
+            Ok(()) => println!(
+                "[backend]   .. DownloadBenchmark OK ({total} B in {:.2}s)",
+                started.elapsed().as_secs_f64()
+            ),
+            Err(e) => eprintln!("[backend]   .. DownloadBenchmark finish FAILED: {e:?}"),
+        }
     }
 }
 
@@ -344,7 +288,9 @@ async fn main() {
         (id, Some(bundle))
     } else {
         println!("[backend] XX mode — fresh pairing (no state at {state_path})");
-        (test_identity(&SoftwareCrypto), None)
+        let id = generate_identity(&SoftwareCrypto, "ql-link-lab backend")
+            .expect("generate_identity failed");
+        (id, None)
     };
     let identity_to_save = identity.clone();
 
@@ -362,11 +308,11 @@ async fn main() {
         handle.connect();
         "IK reconnect"
     } else {
-        let token = parse_token(&token_hex.expect(
+        let invite = parse_invite(&token_hex.expect(
             "XX mode needs --token <hex>  (the part after the last ':' in the \
              sim's `QLV2_PAIRING_QR 12:34:56:78:9A:BC:<hex>` log line)",
         ));
-        handle.start_pairing(token);
+        handle.start_pairing(invite);
         "XX pairing"
     };
 
@@ -396,10 +342,10 @@ async fn main() {
         println!(
             "[backend] serve mode — Router up (Echo). Waiting for device-initiated RPC; Ctrl-C to stop."
         );
-        let builder = Router::<RouterState, QlStream, SendSpawn>::builder(SendSpawn)
-            .request::<Echo>()
-            .subscription::<BytesBenchmark>()
-            .download::<DownloadBenchmark>();
+        let builder = Router::<RouterState, QlStream, TokioSendSpawn>::builder_send(TokioSendSpawn)
+            .request::<route::Echo>()
+            .subscription::<route::BytesBenchmark>()
+            .download::<route::DownloadBenchmark>();
         #[cfg(feature = "chat")]
         let builder = builder.request::<ChatSend>();
         let router = builder.build(RouterState);
@@ -432,26 +378,33 @@ async fn main() {
     println!("[backend] done — closing session");
 }
 
-/// Persist `(identity ‖ peer bundle)` — both fixed-size wire encodings,
-/// simply concatenated.
+/// Persist `(identity ‖ peer bundle)`. Identity wire size is variable
+/// (includes a name), so prefix it with a u32 length to split cleanly on
+/// load.
 fn save_state(path: &str, identity: &QlIdentity, bundle: &PeerBundle) {
-    let mut buf = identity.encode_vec();
-    buf.extend_from_slice(&bundle.encode_vec());
+    let id_buf = identity.encode_vec();
+    let bundle_buf = bundle.encode_vec();
+    let mut buf = Vec::with_capacity(4 + id_buf.len() + bundle_buf.len());
+    buf.extend_from_slice(&(id_buf.len() as u32).to_be_bytes());
+    buf.extend_from_slice(&id_buf);
+    buf.extend_from_slice(&bundle_buf);
     std::fs::write(path, &buf).unwrap_or_else(|e| panic!("cannot write state {path}: {e}"));
 }
 
 fn load_state(path: &str) -> (QlIdentity, PeerBundle) {
     let buf = std::fs::read(path).unwrap_or_else(|e| panic!("cannot read state {path}: {e}"));
-    let split = QlIdentity::WIRE_SIZE;
-    if buf.len() != split + PeerBundle::WIRE_SIZE {
-        panic!(
-            "state file {path} is {} bytes, expected {}",
-            buf.len(),
-            split + PeerBundle::WIRE_SIZE
-        );
-    }
-    let identity = QlIdentity::decode_exact(&buf[..split]).expect("decode identity from state");
-    let bundle = PeerBundle::decode_exact(&buf[split..]).expect("decode peer bundle from state");
+    assert!(buf.len() >= 4, "state file {path} truncated");
+    let id_len = u32::from_be_bytes(buf[0..4].try_into().unwrap()) as usize;
+    assert!(
+        buf.len() >= 4 + id_len,
+        "state file {path} truncated (need {} got {})",
+        4 + id_len,
+        buf.len()
+    );
+    let identity = QlIdentity::decode_exact(&buf[4..4 + id_len])
+        .unwrap_or_else(|e| panic!("decode identity from state: {e:?}"));
+    let bundle = PeerBundle::decode_exact(&buf[4 + id_len..])
+        .unwrap_or_else(|e| panic!("decode peer bundle from state: {e:?}"));
     (identity, bundle)
 }
 
@@ -459,11 +412,16 @@ async fn run_echo(handle: &RuntimeHandle) {
     let msg = "hello from the backend over QL v2".to_string();
     println!("[backend] echo → {msg:?}");
     let started = Instant::now();
-    match handle.rpc().request::<Echo>(&msg).await {
+    match handle
+        .rpc()
+        .request::<route::Echo>(&EchoRequest { message: msg.clone() })
+        .await
+    {
         Ok(reply) => {
-            let ok = reply == msg;
+            let ok = reply.message == msg;
             println!(
-                "[backend] echo ← {reply:?}  ({:.1} ms round-trip, match={ok})",
+                "[backend] echo ← {:?}  ({:.1} ms round-trip, match={ok})",
+                reply.message,
                 started.elapsed().as_secs_f64() * 1000.0
             );
             assert!(ok, "echo reply did not match request");
@@ -480,7 +438,7 @@ async fn run_benchmark(handle: &RuntimeHandle, length: u32) {
     let started = Instant::now();
     let mut sub = match handle
         .rpc()
-        .subscribe::<BytesBenchmark>(&BenchmarkRequest { length })
+        .subscribe::<route::BytesBenchmark>(&BenchmarkRequest { length })
         .await
     {
         Ok(s) => s,
@@ -493,7 +451,7 @@ async fn run_benchmark(handle: &RuntimeHandle, length: u32) {
     let mut received = 0usize;
     while let Some(event) = sub.next_event().await {
         match event {
-            Ok(chunk) => received += chunk.len(),
+            Ok(chunk) => received += chunk.bytes.len(),
             Err(e) => {
                 eprintln!("[backend] benchmark stream error after {received} B: {e:?}");
                 return;
@@ -509,20 +467,30 @@ async fn run_benchmark(handle: &RuntimeHandle, length: u32) {
     );
 }
 
-fn parse_token(raw: &str) -> PairingToken {
-    // Accept either the bare hex token or the whole QR payload
-    // `12:34:56:78:9A:BC:<hex>` — the token is whatever follows the last ':'.
+fn parse_invite(raw: &str) -> PairingInvite {
+    // Accept either the bare invite hex or the whole QR payload
+    // `12:34:56:78:9A:BC:<hex>` — invite is whatever follows the last ':'.
+    // Format: 1 byte version (==1) + 16 byte QID + 16 byte PairingToken.
     let hex_part = raw.rsplit(':').next().unwrap_or(raw).trim();
     let bytes = hex::decode(hex_part)
-        .unwrap_or_else(|e| panic!("token is not valid hex ({e}): {hex_part:?}"));
-    let arr: [u8; PairingToken::SIZE] = bytes.as_slice().try_into().unwrap_or_else(|_| {
-        panic!(
-            "token must be {} bytes, got {}",
-            PairingToken::SIZE,
-            bytes.len()
-        )
-    });
-    PairingToken(arr)
+        .unwrap_or_else(|e| panic!("invite is not valid hex ({e}): {hex_part:?}"));
+    let expected = 1 + QID::SIZE + PairingToken::SIZE;
+    assert_eq!(
+        bytes.len(),
+        expected,
+        "invite must be {expected} bytes (1 ver + {} qid + {} token), got {}",
+        QID::SIZE,
+        PairingToken::SIZE,
+        bytes.len()
+    );
+    assert_eq!(bytes[0], PairingInvite::VERSION, "invite version must be {}", PairingInvite::VERSION);
+    let qid_arr: [u8; QID::SIZE] = bytes[1..1 + QID::SIZE].try_into().unwrap();
+    let token_arr: [u8; PairingToken::SIZE] =
+        bytes[1 + QID::SIZE..].try_into().unwrap();
+    PairingInvite {
+        qid: QID(qid_arr),
+        token: PairingToken(token_arr),
+    }
 }
 
 fn ble_config() -> RuntimeConfig {
@@ -786,7 +754,7 @@ impl QlPlatform for BackendPlatform {
         let _ = self.peer.try_send(peer);
     }
 
-    fn handle_peer_status(&self, peer: Option<XID>, status: PeerStatus) {
+    fn handle_peer_status(&self, peer: Option<QID>, status: PeerStatus) {
         log::info!("[status] peer={peer:?} status={status:?}");
         let _ = self.status.try_send(status);
     }

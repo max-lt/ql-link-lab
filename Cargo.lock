@@ -96,6 +96,7 @@ dependencies = [
  "futures-lite",
  "hex",
  "log",
+ "ql-api",
  "ql-fsm",
  "ql-rpc",
  "ql-runtime",
@@ -121,7 +122,7 @@ dependencies = [
 [[package]]
 name = "btp"
 version = "0.1.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.4.6#2be09d6a8bb45963e3c6faa13c47f9cc20bba48a"
+source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.6.2#a67eb6d33b34dfa7fa3f25073d681a1ef41192ba"
 dependencies = [
  "bytemuck",
  "consts",
@@ -168,6 +169,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
+name = "ciborium"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42e69ffd6f0917f5c029256a24d0161db17cea3997d185db0d35926308770f0e"
+dependencies = [
+ "ciborium-io",
+ "ciborium-ll",
+ "serde",
+]
+
+[[package]]
+name = "ciborium-io"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05afea1e0a06c9be33d539b876f1ce3692f4afea2cb41f740e7743225ed1c757"
+
+[[package]]
+name = "ciborium-ll"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57663b653d948a338bfb3eeba9bb2fd5fcfaecb9e199e87e1eda4d9e8b240fd9"
+dependencies = [
+ "ciborium-io",
+ "half",
+]
+
+[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -212,6 +240,12 @@ name = "crossbeam-utils"
 version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
+
+[[package]]
+name = "crunchy"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "crypto-common"
@@ -388,6 +422,17 @@ dependencies = [
  "r-efi 6.0.0",
  "wasip2",
  "wasip3",
+]
+
+[[package]]
+name = "half"
+version = "2.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ea2d84b969582b4b1864a92dc5d27cd2b77b622a8d79306834f1be5ba20d84b"
+dependencies = [
+ "cfg-if",
+ "crunchy",
+ "zerocopy",
 ]
 
 [[package]]
@@ -763,9 +808,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ql-api"
+version = "0.1.0"
+source = "git+https://github.com/Foundation-Devices/foundation-api?branch=ql-v2-shared-api#78da0517212a93b1ab113638782acc0ac4a64237"
+dependencies = [
+ "bytes",
+ "ciborium",
+ "ql-rpc",
+ "serde",
+]
+
+[[package]]
 name = "ql-fsm"
 version = "0.1.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?rev=63ef28e324fc0c039f04c061067da0f4acc4c915#63ef28e324fc0c039f04c061067da0f4acc4c915"
+source = "git+https://github.com/Foundation-Devices/foundation-api?branch=ql-v2-shared-api#78da0517212a93b1ab113638782acc0ac4a64237"
 dependencies = [
  "bytes",
  "indexmap",
@@ -775,15 +831,16 @@ dependencies = [
 [[package]]
 name = "ql-rpc"
 version = "0.1.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?rev=63ef28e324fc0c039f04c061067da0f4acc4c915#63ef28e324fc0c039f04c061067da0f4acc4c915"
+source = "git+https://github.com/Foundation-Devices/foundation-api?branch=ql-v2-shared-api#78da0517212a93b1ab113638782acc0ac4a64237"
 dependencies = [
  "bytes",
+ "trait-variant",
 ]
 
 [[package]]
 name = "ql-runtime"
 version = "0.1.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?rev=63ef28e324fc0c039f04c061067da0f4acc4c915#63ef28e324fc0c039f04c061067da0f4acc4c915"
+source = "git+https://github.com/Foundation-Devices/foundation-api?branch=ql-v2-shared-api#78da0517212a93b1ab113638782acc0ac4a64237"
 dependencies = [
  "async-channel",
  "bytes",
@@ -799,7 +856,7 @@ dependencies = [
 [[package]]
 name = "ql-wire"
 version = "0.1.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?rev=63ef28e324fc0c039f04c061067da0f4acc4c915#63ef28e324fc0c039f04c061067da0f4acc4c915"
+source = "git+https://github.com/Foundation-Devices/foundation-api?branch=ql-v2-shared-api#78da0517212a93b1ab113638782acc0ac4a64237"
 dependencies = [
  "bytes",
  "getrandom 0.2.17",
@@ -1048,6 +1105,17 @@ name = "tokio-macros"
 version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "385a6cb71ab9ab790c5fe8d67f1645e6c450a7ce006a33de03daa956cf70a496"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "trait-variant"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70977707304198400eb4835a78f6a9f928bf41bba420deb8fdb175cd965d77a7"
 dependencies = [
  "proc-macro2",
  "quote",

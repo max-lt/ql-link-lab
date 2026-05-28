@@ -13,6 +13,7 @@ ql-wire = { workspace = true }
 ql-fsm = { workspace = true }
 ql-runtime = { workspace = true }
 ql-rpc = { workspace = true }
+ql-api = { workspace = true }
 btp = { workspace = true }
 
 tokio = { workspace = true }
