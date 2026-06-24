@@ -303,8 +303,7 @@ impl DownloadHandler<route::DownloadBenchmark, QlStream> for RouterState {
 
 // ===== entry point =====
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
-async fn main() {
+pub async fn run(args: Vec<String>) {
     // Surface ql-runtime's internal handshake tracing by default; override
     // with RUST_LOG. This is the only window into why pairing stalls — the
     // device side logs nothing at INFO during the handshake.
@@ -313,7 +312,7 @@ async fn main() {
     )
     .init();
 
-    let mut args = std::env::args().skip(1);
+    let mut args = args.into_iter();
     let mut peer = DEFAULT_PEER.to_string();
     let mut token_hex: Option<String> = None;
     let mut bench_len: u32 = 256 * 1024;

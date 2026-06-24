@@ -22,8 +22,7 @@ use tokio::net::{TcpListener, TcpStream};
 const BACKEND_LISTEN: &str = "127.0.0.1:8766";
 const DEVICE_BRIDGE: &str = "127.0.0.1:8765";
 
-#[tokio::main]
-async fn main() {
+pub async fn run() {
     let listener = TcpListener::bind(BACKEND_LISTEN)
         .await
         .unwrap_or_else(|e| panic!("[relay] cannot bind {BACKEND_LISTEN}: {e}"));
