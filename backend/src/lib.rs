@@ -33,7 +33,8 @@ use async_channel::{Receiver, Sender};
 use futures_lite::Stream;
 use ql_api::{
     route, BenchmarkEvent, BenchmarkRequest, DownloadBenchmarkHeader, DownloadBenchmarkPartHeader,
-    DownloadBenchmarkRequest, EchoRequest, EchoResponse,
+    DownloadBenchmarkRequest, EchoRequest, EchoResponse, ExchangeRate,
+    ExchangeRateSubscriptionRequest,
 };
 use ql_common::{StreamInfo, QID};
 #[cfg(feature = "chat")]
@@ -170,6 +171,7 @@ impl RequestHandler<route::Echo, QlStream> for RouterState {
             request.message
         );
         let echoed = request.message.clone();
+        #[cfg(feature = "mcp")]
         let started = Instant::now();
         match responder
             .respond(EchoResponse {
@@ -230,6 +232,30 @@ impl SubscriptionHandler<route::BytesBenchmark, QlStream> for RouterState {
             }
             Err(e) => eprintln!("[backend]   .. BytesBenchmark finish FAILED: {e:?}"),
         }
+    }
+}
+
+// gui-app-launcher subscribes to exchange rates on connect and retries with no
+// backoff whenever the route resets, so an unhandled route 701 floods the
+// session and tears it down. Park the subscription: send one rate, then hold
+// the stream open so the launcher stops storming. A real companion would stream
+// live rates here.
+impl SubscriptionHandler<route::ExchangeRateSubscription, QlStream> for RouterState {
+    async fn handle(
+        self,
+        _context: ql_rpc::Context,
+        _request: ExchangeRateSubscriptionRequest,
+        mut responder: SubscriptionResponder<ExchangeRate, <QlStream as RpcStream>::Writer>,
+    ) {
+        println!("[backend] ← inbound ExchangeRateSubscription — parking the stream");
+        let _ = responder
+            .send(ExchangeRate {
+                currency_code: "USD".into(),
+                rate: 0.0,
+                timestamp: 0,
+            })
+            .await;
+        std::future::pending::<()>().await;
     }
 }
 
@@ -453,6 +479,7 @@ pub async fn run(args: Vec<String>) {
         let builder = Router::<RouterState, QlStream, TokioSendSpawn>::builder_send(TokioSendSpawn)
             .request::<route::Echo>()
             .subscription::<route::BytesBenchmark>()
+            .subscription::<route::ExchangeRateSubscription>()
             .download::<route::DownloadBenchmark>();
         #[cfg(feature = "chat")]
         let builder = builder.request::<ChatSend>();
