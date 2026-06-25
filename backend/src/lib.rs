@@ -90,11 +90,11 @@ const DEFAULT_STATE: &str = "/tmp/foundation-lab-peer.state";
 
 #[cfg(feature = "chat")]
 pub struct ChatSend;
-// gui-app-chat's app id ("chat" padded to 16 bytes, per its manifest) --
-// the service every Chat route is addressed under.
+// The device's os/ql does not yet populate the outbound stream service_id from
+// Route::SERVICE -- it emits 0 for every stream, like the built-in routes. So
+// Chat lives on the system service (0) for now, not its own app id.
 #[cfg(feature = "chat")]
-const CHAT_SERVICE: ServiceId =
-    ServiceId([0x63, 0x68, 0x61, 0x74, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+const CHAT_SERVICE: ServiceId = ServiceId([0; 16]);
 #[cfg(feature = "chat")]
 impl Route for ChatSend {
     const SERVICE: ServiceId = CHAT_SERVICE;
