@@ -13,13 +13,14 @@ path = "src/main.rs"
 
 [features]
 default = ["all"]
-all = ["relay", "backend", "fido", "piv", "ccid-inspect"]
+all = ["relay", "backend", "fido", "piv", "ccid-inspect", "logs"]
 relay = ["dep:relay", "dep:tokio"]
 backend = ["dep:backend", "dep:tokio"]
 mcp = ["backend", "backend/mcp"]
 fido = ["dep:hidapi", "dep:p256", "dep:sha2"]
 piv = ["dep:pcsc", "dep:p256", "dep:x509-cert"]
 ccid-inspect = ["dep:nusb"]
+logs = ["dep:rusb"]
 
 [dependencies]
 anyhow = "1"
@@ -33,3 +34,4 @@ p256 = { version = "0.13", features = ["ecdsa"], optional = true }
 sha2 = { version = "0.10", optional = true }
 x509-cert = { version = "0.2", optional = true }
 nusb = { version = "0.2", optional = true }
+rusb = { version = "0.9", optional = true }

@@ -12,6 +12,8 @@ mod fido;
 mod piv;
 #[cfg(feature = "ccid-inspect")]
 mod ccid_inspect;
+#[cfg(feature = "logs")]
+mod logs;
 
 #[derive(Parser)]
 #[command(name = "fl", about = "Foundation Lab -- device and QL test harness")]
@@ -41,6 +43,9 @@ enum Command {
     /// Dump and decode USB descriptors of CCID readers (compare e.g. Prime vs YubiKey).
     #[cfg(feature = "ccid-inspect")]
     CcidInspect(ccid_inspect::Args),
+    /// Stream the device debug log to stdout (headless keyos-log-viewer).
+    #[cfg(feature = "logs")]
+    Logs(logs::Args),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -55,6 +60,8 @@ fn main() -> anyhow::Result<()> {
         Command::Piv(args) => piv::run(args)?,
         #[cfg(feature = "ccid-inspect")]
         Command::CcidInspect(args) => ccid_inspect::run(args)?,
+        #[cfg(feature = "logs")]
+        Command::Logs(args) => logs::run(args)?,
     }
     Ok(())
 }
