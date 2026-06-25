@@ -223,7 +223,7 @@ dependencies = [
 [[package]]
 name = "btp"
 version = "0.1.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?tag=5.6.2#a67eb6d33b34dfa7fa3f25073d681a1ef41192ba"
+source = "git+https://github.com/Foundation-Devices/foundation-api?branch=ql-v2-shared-api#c4e0c12e94ad0ab28336ce7c4936114960a742ca"
 dependencies = [
  "bytemuck",
  "consts",
@@ -585,6 +585,7 @@ dependencies = [
  "p256",
  "pcsc",
  "relay",
+ "sha2",
  "tokio",
  "x509-cert",
 ]
@@ -1291,7 +1292,7 @@ dependencies = [
 [[package]]
 name = "ql-api"
 version = "0.1.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?branch=ql-v2-shared-api#78da0517212a93b1ab113638782acc0ac4a64237"
+source = "git+https://github.com/Foundation-Devices/foundation-api?branch=ql-v2-shared-api#c4e0c12e94ad0ab28336ce7c4936114960a742ca"
 dependencies = [
  "bytes",
  "ciborium",
@@ -1300,9 +1301,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ql-common"
+version = "0.1.0"
+source = "git+https://github.com/Foundation-Devices/foundation-api?branch=ql-v2-shared-api#c4e0c12e94ad0ab28336ce7c4936114960a742ca"
+
+[[package]]
 name = "ql-fsm"
 version = "0.1.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?branch=ql-v2-shared-api#78da0517212a93b1ab113638782acc0ac4a64237"
+source = "git+https://github.com/Foundation-Devices/foundation-api?branch=ql-v2-shared-api#c4e0c12e94ad0ab28336ce7c4936114960a742ca"
 dependencies = [
  "bytes",
  "indexmap",
@@ -1312,16 +1318,17 @@ dependencies = [
 [[package]]
 name = "ql-rpc"
 version = "0.1.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?branch=ql-v2-shared-api#78da0517212a93b1ab113638782acc0ac4a64237"
+source = "git+https://github.com/Foundation-Devices/foundation-api?branch=ql-v2-shared-api#c4e0c12e94ad0ab28336ce7c4936114960a742ca"
 dependencies = [
  "bytes",
+ "ql-common",
  "trait-variant",
 ]
 
 [[package]]
 name = "ql-runtime"
 version = "0.1.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?branch=ql-v2-shared-api#78da0517212a93b1ab113638782acc0ac4a64237"
+source = "git+https://github.com/Foundation-Devices/foundation-api?branch=ql-v2-shared-api#c4e0c12e94ad0ab28336ce7c4936114960a742ca"
 dependencies = [
  "async-channel",
  "bytes",
@@ -1337,12 +1344,13 @@ dependencies = [
 [[package]]
 name = "ql-wire"
 version = "0.1.0"
-source = "git+https://github.com/Foundation-Devices/foundation-api?branch=ql-v2-shared-api#78da0517212a93b1ab113638782acc0ac4a64237"
+source = "git+https://github.com/Foundation-Devices/foundation-api?branch=ql-v2-shared-api#c4e0c12e94ad0ab28336ce7c4936114960a742ca"
 dependencies = [
  "bytes",
  "getrandom 0.2.17",
  "libcrux-aesgcm",
  "libcrux-ml-kem",
+ "ql-common",
  "sha2",
 ]
 

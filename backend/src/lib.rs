@@ -37,13 +37,13 @@ use ql_api::{
 };
 use ql_fsm::{PairingInvite, PeerStatus, QlFsmConfig};
 #[cfg(feature = "chat")]
-use ql_rpc::{notification::Notification, request::Request, Route};
+use ql_rpc::{notification::Notification, request::Request, Route, ServiceId};
 use ql_rpc::{
     DownloadHandler, DownloadStart, RequestHandler, Response, RouteId, Router, RpcStream,
     SendSpawner, Spawner, SubscriptionHandler, SubscriptionResponder,
 };
 use ql_runtime::{
-    new_runtime, QlInbound, QlPlatform, QlStream, QlTimer, RuntimeConfig, RuntimeHandle,
+    new_runtime, QlInbound, QlInboundStream, QlPlatform, QlTimer, RuntimeConfig, RuntimeHandle,
 };
 use ql_wire::{
     generate_identity, MlKemCiphertext, MlKemKeyPair, MlKemPrivateKey, MlKemPublicKey, Nonce,
@@ -86,8 +86,14 @@ const DEFAULT_STATE: &str = "/tmp/ql-link-lab-peer.state";
 
 #[cfg(feature = "chat")]
 pub struct ChatSend;
+// gui-app-chat's app id ("chat" padded to 16 bytes, per its manifest) --
+// the service every Chat route is addressed under.
+#[cfg(feature = "chat")]
+const CHAT_SERVICE: ServiceId =
+    ServiceId([0x63, 0x68, 0x61, 0x74, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 #[cfg(feature = "chat")]
 impl Route for ChatSend {
+    const SERVICE: ServiceId = CHAT_SERVICE;
     const ROUTE: RouteId = RouteId::from_u32(100);
 }
 #[cfg(feature = "chat")]
@@ -101,6 +107,7 @@ impl Request for ChatSend {
 pub struct ChatPush;
 #[cfg(feature = "chat")]
 impl Route for ChatPush {
+    const SERVICE: ServiceId = CHAT_SERVICE;
     const ROUTE: RouteId = RouteId::from_u32(101);
 }
 #[cfg(feature = "chat")]
@@ -148,11 +155,12 @@ impl SendSpawner for TokioSendSpawn {
     }
 }
 
-impl RequestHandler<route::Echo, QlStream> for RouterState {
+impl RequestHandler<route::Echo, QlInboundStream> for RouterState {
     async fn handle(
         self,
+        _context: ql_rpc::Context,
         request: EchoRequest,
-        responder: Response<EchoResponse, <QlStream as RpcStream>::Writer>,
+        responder: Response<EchoResponse, <QlInboundStream as RpcStream>::Writer>,
     ) {
         println!(
             "[backend] ← inbound Echo {:?} — responding",
@@ -183,11 +191,12 @@ impl RequestHandler<route::Echo, QlStream> for RouterState {
 // Stream `request.length` bytes back to the subscriber in 4 KiB chunks.
 const BENCHMARK_CHUNK_LEN: usize = 4 * 1024;
 
-impl SubscriptionHandler<route::BytesBenchmark, QlStream> for RouterState {
+impl SubscriptionHandler<route::BytesBenchmark, QlInboundStream> for RouterState {
     async fn handle(
         self,
+        _context: ql_rpc::Context,
         request: BenchmarkRequest,
-        mut responder: SubscriptionResponder<BenchmarkEvent, <QlStream as RpcStream>::Writer>,
+        mut responder: SubscriptionResponder<BenchmarkEvent, <QlInboundStream as RpcStream>::Writer>,
     ) {
         let total = request.length as usize;
         println!("[backend] ← inbound BytesBenchmark subscription, length={total} — streaming");
@@ -222,11 +231,12 @@ impl SubscriptionHandler<route::BytesBenchmark, QlStream> for RouterState {
 }
 
 #[cfg(feature = "chat")]
-impl RequestHandler<ChatSend, QlStream> for RouterState {
+impl RequestHandler<ChatSend, QlInboundStream> for RouterState {
     async fn handle(
         self,
+        _context: ql_rpc::Context,
         message: String,
-        responder: Response<String, <QlStream as RpcStream>::Writer>,
+        responder: Response<String, <QlInboundStream as RpcStream>::Writer>,
     ) {
         println!("[backend] chat ← from device: {message:?}");
         #[cfg(feature = "mcp")]
@@ -239,11 +249,12 @@ impl RequestHandler<ChatSend, QlStream> for RouterState {
     }
 }
 
-impl DownloadHandler<route::DownloadBenchmark, QlStream> for RouterState {
+impl DownloadHandler<route::DownloadBenchmark, QlInboundStream> for RouterState {
     async fn handle(
         self,
+        _context: ql_rpc::Context,
         request: DownloadBenchmarkRequest,
-        download: DownloadStart<route::DownloadBenchmark, <QlStream as RpcStream>::Writer>,
+        download: DownloadStart<route::DownloadBenchmark, <QlInboundStream as RpcStream>::Writer>,
     ) {
         let total = request.length as usize;
         println!(
@@ -436,7 +447,7 @@ pub async fn run(args: Vec<String>) {
             #[cfg(feature = "mcp")]
             events: mcp_addr.as_ref().map(|_| mcp_events_tx.clone()),
         };
-        let builder = Router::<RouterState, QlStream, TokioSendSpawn>::builder_send(TokioSendSpawn)
+        let builder = Router::<RouterState, QlInboundStream, TokioSendSpawn>::builder_send(TokioSendSpawn)
             .request::<route::Echo>()
             .subscription::<route::BytesBenchmark>()
             .download::<route::DownloadBenchmark>();
@@ -715,7 +726,7 @@ struct Plumbing {
     inbound_tx: Sender<Vec<u8>>,
     status_rx: Receiver<PeerStatus>,
     peer_rx: Receiver<PeerBundle>,
-    inbound_streams_rx: Receiver<QlStream>,
+    inbound_streams_rx: Receiver<QlInboundStream>,
 }
 
 struct BackendPlatform {
@@ -723,7 +734,7 @@ struct BackendPlatform {
     inbound: Option<Receiver<Vec<u8>>>,
     status: Sender<PeerStatus>,
     peer: Sender<PeerBundle>,
-    inbound_streams: Sender<QlStream>,
+    inbound_streams: Sender<QlInboundStream>,
     crypto: SoftwareCrypto,
     #[cfg(feature = "mcp")]
     mcp_events: Option<tokio::sync::broadcast::Sender<mcp::BackendEvent>>,
@@ -894,7 +905,7 @@ impl QlPlatform for BackendPlatform {
         }
     }
 
-    fn handle_inbound(&self, stream: QlStream) {
+    fn handle_inbound(&self, stream: QlInboundStream) {
         // The peer opened a stream to us (device-initiated RPC). Hand it
         // to the serve loop; if no one is serving, it's simply dropped.
         let _ = self.inbound_streams.try_send(stream);
