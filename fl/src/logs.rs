@@ -8,7 +8,10 @@
 //! Wire format (device -> host) mirrors os/usb-debug/protocol: bulk-IN frames `[TYPE:1][PAYLOAD]`
 //! ended by a short packet; TYPE 0x01 (Log) carries 0x1E-terminated log records.
 
-use std::{io::Write, time::Duration};
+use std::{
+    io::Write,
+    time::{Duration, Instant},
+};
 
 use anyhow::{bail, Context, Result};
 use rusb::{Direction, TransferType};
@@ -24,6 +27,12 @@ pub struct Args {
     /// Only print log records containing this substring (e.g. "ccid").
     #[arg(long)]
     filter: Option<String>,
+    /// Stop after printing this many records.
+    #[arg(long)]
+    limit: Option<usize>,
+    /// Stop after this many seconds.
+    #[arg(long)]
+    timeout: Option<u64>,
 }
 
 pub fn run(args: Args) -> Result<()> {
@@ -58,11 +67,16 @@ pub fn run(args: Args) -> Result<()> {
         .context("claiming the debug interface (close keyos-log-viewer first -- it holds it)")?;
     eprintln!("streaming device logs (Ctrl-C to stop)");
 
+    let deadline = args.timeout.map(|secs| Instant::now() + Duration::from_secs(secs));
+    let mut printed = 0usize;
     let mut buf = vec![0u8; READ_CHUNK];
     let mut frame: Vec<u8> = Vec::new();
     let mut records: Vec<u8> = Vec::new();
     let stdout = std::io::stdout();
     loop {
+        if deadline.is_some_and(|d| Instant::now() >= d) {
+            return Ok(());
+        }
         let end_of_frame = match handle.read_bulk(ep_in, &mut buf, Duration::from_millis(200)) {
             Ok(0) => true,
             Ok(n) => {
@@ -93,6 +107,11 @@ pub fn run(args: Args) -> Result<()> {
                 }
                 let mut out = stdout.lock();
                 let _ = writeln!(out, "{line}");
+                drop(out);
+                printed += 1;
+                if args.limit.is_some_and(|n| printed >= n) {
+                    return Ok(());
+                }
             }
         }
         frame.clear();
