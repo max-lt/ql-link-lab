@@ -25,6 +25,7 @@ ql-fsm = { git = "https://github.com/Foundation-Devices/foundation-api", branch 
 ql-runtime = { git = "https://github.com/Foundation-Devices/foundation-api", branch = "ql-v2-shared-api", features = ["rpc", "log"] }
 ql-rpc = { git = "https://github.com/Foundation-Devices/foundation-api", branch = "ql-v2-shared-api" }
 ql-api = { git = "https://github.com/Foundation-Devices/foundation-api", branch = "ql-v2-shared-api" }
+ql-common = { git = "https://github.com/Foundation-Devices/foundation-api", branch = "ql-v2-shared-api" }
 btp = { git = "https://github.com/Foundation-Devices/foundation-api", branch = "ql-v2-shared-api" }
 
 [profile.release]

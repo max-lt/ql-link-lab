@@ -15,6 +15,7 @@ ql-fsm = { workspace = true }
 ql-runtime = { workspace = true }
 ql-rpc = { workspace = true }
 ql-api = { workspace = true }
+ql-common = { workspace = true }
 btp = { workspace = true }
 
 tokio = { workspace = true }

@@ -35,20 +35,23 @@ use ql_api::{
     route, BenchmarkEvent, BenchmarkRequest, DownloadBenchmarkHeader, DownloadBenchmarkPartHeader,
     DownloadBenchmarkRequest, EchoRequest, EchoResponse,
 };
+use ql_common::{StreamInfo, QID};
+#[cfg(feature = "chat")]
+use ql_common::{RouteId, ServiceId};
 use ql_fsm::{PairingInvite, PeerStatus, QlFsmConfig};
 #[cfg(feature = "chat")]
-use ql_rpc::{notification::Notification, request::Request, Route, ServiceId};
+use ql_rpc::{notification::Notification, request::Request, Route};
 use ql_rpc::{
-    DownloadHandler, DownloadStart, RequestHandler, Response, RouteId, Router, RpcStream,
-    SendSpawner, Spawner, SubscriptionHandler, SubscriptionResponder,
+    DownloadHandler, DownloadStart, RequestHandler, Response, Router, RpcStream, SendSpawner,
+    Spawner, SubscriptionHandler, SubscriptionResponder,
 };
 use ql_runtime::{
-    new_runtime, QlInbound, QlInboundStream, QlPlatform, QlTimer, RuntimeConfig, RuntimeHandle,
+    new_runtime, QlInbound, QlStream, QlPlatform, QlTimer, RuntimeConfig, RuntimeHandle,
 };
 use ql_wire::{
     generate_identity, MlKemCiphertext, MlKemKeyPair, MlKemPrivateKey, MlKemPublicKey, Nonce,
     PairingToken, PeerBundle, QlAead, QlHash, QlIdentity, QlKem, QlRandom, SessionKey,
-    SoftwareCrypto, WireDecode, WireEncode, QID,
+    SoftwareCrypto, WireDecode, WireEncode,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -155,12 +158,12 @@ impl SendSpawner for TokioSendSpawn {
     }
 }
 
-impl RequestHandler<route::Echo, QlInboundStream> for RouterState {
+impl RequestHandler<route::Echo, QlStream> for RouterState {
     async fn handle(
         self,
         _context: ql_rpc::Context,
         request: EchoRequest,
-        responder: Response<EchoResponse, <QlInboundStream as RpcStream>::Writer>,
+        responder: Response<EchoResponse, <QlStream as RpcStream>::Writer>,
     ) {
         println!(
             "[backend] ← inbound Echo {:?} — responding",
@@ -191,12 +194,12 @@ impl RequestHandler<route::Echo, QlInboundStream> for RouterState {
 // Stream `request.length` bytes back to the subscriber in 4 KiB chunks.
 const BENCHMARK_CHUNK_LEN: usize = 4 * 1024;
 
-impl SubscriptionHandler<route::BytesBenchmark, QlInboundStream> for RouterState {
+impl SubscriptionHandler<route::BytesBenchmark, QlStream> for RouterState {
     async fn handle(
         self,
         _context: ql_rpc::Context,
         request: BenchmarkRequest,
-        mut responder: SubscriptionResponder<BenchmarkEvent, <QlInboundStream as RpcStream>::Writer>,
+        mut responder: SubscriptionResponder<BenchmarkEvent, <QlStream as RpcStream>::Writer>,
     ) {
         let total = request.length as usize;
         println!("[backend] ← inbound BytesBenchmark subscription, length={total} — streaming");
@@ -231,12 +234,12 @@ impl SubscriptionHandler<route::BytesBenchmark, QlInboundStream> for RouterState
 }
 
 #[cfg(feature = "chat")]
-impl RequestHandler<ChatSend, QlInboundStream> for RouterState {
+impl RequestHandler<ChatSend, QlStream> for RouterState {
     async fn handle(
         self,
         _context: ql_rpc::Context,
         message: String,
-        responder: Response<String, <QlInboundStream as RpcStream>::Writer>,
+        responder: Response<String, <QlStream as RpcStream>::Writer>,
     ) {
         println!("[backend] chat ← from device: {message:?}");
         #[cfg(feature = "mcp")]
@@ -249,12 +252,12 @@ impl RequestHandler<ChatSend, QlInboundStream> for RouterState {
     }
 }
 
-impl DownloadHandler<route::DownloadBenchmark, QlInboundStream> for RouterState {
+impl DownloadHandler<route::DownloadBenchmark, QlStream> for RouterState {
     async fn handle(
         self,
         _context: ql_rpc::Context,
         request: DownloadBenchmarkRequest,
-        download: DownloadStart<route::DownloadBenchmark, <QlInboundStream as RpcStream>::Writer>,
+        download: DownloadStart<route::DownloadBenchmark, <QlStream as RpcStream>::Writer>,
     ) {
         let total = request.length as usize;
         println!(
@@ -447,7 +450,7 @@ pub async fn run(args: Vec<String>) {
             #[cfg(feature = "mcp")]
             events: mcp_addr.as_ref().map(|_| mcp_events_tx.clone()),
         };
-        let builder = Router::<RouterState, QlInboundStream, TokioSendSpawn>::builder_send(TokioSendSpawn)
+        let builder = Router::<RouterState, QlStream, TokioSendSpawn>::builder_send(TokioSendSpawn)
             .request::<route::Echo>()
             .subscription::<route::BytesBenchmark>()
             .download::<route::DownloadBenchmark>();
@@ -479,7 +482,7 @@ pub async fn run(args: Vec<String>) {
         }
         loop {
             match plumbing.inbound_streams_rx.recv().await {
-                Ok(stream) => match router.handle(stream) {
+                Ok((info, stream)) => match router.handle(info, stream) {
                     Some((route, fut)) => {
                         println!("[backend] serving inbound RPC on {route:?}");
                         tokio::spawn(fut);
@@ -726,7 +729,7 @@ struct Plumbing {
     inbound_tx: Sender<Vec<u8>>,
     status_rx: Receiver<PeerStatus>,
     peer_rx: Receiver<PeerBundle>,
-    inbound_streams_rx: Receiver<QlInboundStream>,
+    inbound_streams_rx: Receiver<(StreamInfo, QlStream)>,
 }
 
 struct BackendPlatform {
@@ -734,7 +737,7 @@ struct BackendPlatform {
     inbound: Option<Receiver<Vec<u8>>>,
     status: Sender<PeerStatus>,
     peer: Sender<PeerBundle>,
-    inbound_streams: Sender<QlInboundStream>,
+    inbound_streams: Sender<(StreamInfo, QlStream)>,
     crypto: SoftwareCrypto,
     #[cfg(feature = "mcp")]
     mcp_events: Option<tokio::sync::broadcast::Sender<mcp::BackendEvent>>,
@@ -905,10 +908,10 @@ impl QlPlatform for BackendPlatform {
         }
     }
 
-    fn handle_inbound(&self, stream: QlInboundStream) {
+    fn handle_inbound(&self, info: StreamInfo, stream: QlStream) {
         // The peer opened a stream to us (device-initiated RPC). Hand it
         // to the serve loop; if no one is serving, it's simply dropped.
-        let _ = self.inbound_streams.try_send(stream);
+        let _ = self.inbound_streams.try_send((info, stream));
     }
 }
 
