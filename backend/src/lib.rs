@@ -358,6 +358,7 @@ pub async fn run(args: Vec<String>) {
     let mut bench_len: u32 = 256 * 1024;
     let mut state_path = DEFAULT_STATE.to_string();
     let mut serve = false;
+    let mut fresh = false;
     #[cfg(feature = "mcp")]
     let mut mcp_addr: Option<String> = None;
     #[cfg(feature = "mcp")]
@@ -370,6 +371,8 @@ pub async fn run(args: Vec<String>) {
             "--token" => token_hex = Some(args.next().expect("--token needs a value")),
             "--state" => state_path = args.next().expect("--state needs a path"),
             "--serve" => serve = true,
+            // Discard any saved state so this run does a fresh XX pairing.
+            "--fresh" => fresh = true,
             "--bench-bytes" => {
                 bench_len = args
                     .next()
@@ -383,6 +386,10 @@ pub async fn run(args: Vec<String>) {
             "--auto-reply" => mcp_auto_reply = true,
             other => panic!("unknown arg: {other}"),
         }
+    }
+
+    if fresh {
+        let _ = std::fs::remove_file(&state_path);
     }
 
     // The presence of the state file selects the mode: a saved
