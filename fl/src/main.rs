@@ -10,6 +10,8 @@ use clap::{Parser, Subcommand};
 mod fido;
 #[cfg(feature = "piv")]
 mod piv;
+#[cfg(feature = "ccid-inspect")]
+mod ccid_inspect;
 
 #[derive(Parser)]
 #[command(name = "fl", about = "Foundation Lab -- device and QL test harness")]
@@ -36,6 +38,9 @@ enum Command {
     /// Drive the device PIV interface over CCID/PCSC.
     #[cfg(feature = "piv")]
     Piv(piv::Args),
+    /// Dump and decode USB descriptors of CCID readers (compare e.g. Prime vs YubiKey).
+    #[cfg(feature = "ccid-inspect")]
+    CcidInspect(ccid_inspect::Args),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -48,6 +53,8 @@ fn main() -> anyhow::Result<()> {
         Command::Fido(args) => fido::run(args)?,
         #[cfg(feature = "piv")]
         Command::Piv(args) => piv::run(args)?,
+        #[cfg(feature = "ccid-inspect")]
+        Command::CcidInspect(args) => ccid_inspect::run(args)?,
     }
     Ok(())
 }
