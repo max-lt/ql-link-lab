@@ -16,17 +16,17 @@ hex = "0.4"
 log = "0.4"
 env_logger = "0.11"
 
-# Protocol crates pinned to match the running KeyOS sim
-# (KeyOS-dev origin/qlv2): ql-* and btp all live on the ql-v2-shared-api
-# branch, so the whole foundation-api set resolves to one rev. Both sides
-# must agree on the wire format or the XX handshake will not validate.
+# Protocol crates pinned to match the running KeyOS sim (KeyOS-dev origin/qlv2):
+# ql-* track the ql-v2-shared-api branch, but btp is pinned to tag 5.7.0 -- the
+# sim pins btp by that tag, and the chunk framing must match byte-for-byte or
+# the XX handshake decrypt fails.
 ql-wire = { git = "https://github.com/Foundation-Devices/foundation-api", branch = "ql-v2-shared-api", features = ["test-utils"] }
 ql-fsm = { git = "https://github.com/Foundation-Devices/foundation-api", branch = "ql-v2-shared-api" }
 ql-runtime = { git = "https://github.com/Foundation-Devices/foundation-api", branch = "ql-v2-shared-api", features = ["rpc", "log"] }
 ql-rpc = { git = "https://github.com/Foundation-Devices/foundation-api", branch = "ql-v2-shared-api" }
 ql-api = { git = "https://github.com/Foundation-Devices/foundation-api", branch = "ql-v2-shared-api" }
 ql-common = { git = "https://github.com/Foundation-Devices/foundation-api", branch = "ql-v2-shared-api" }
-btp = { git = "https://github.com/Foundation-Devices/foundation-api", branch = "ql-v2-shared-api" }
+btp = { git = "https://github.com/Foundation-Devices/foundation-api", tag = "5.7.0" }
 
 [profile.release]
 lto = "thin"
